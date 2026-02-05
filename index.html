@@ -93,7 +93,18 @@
         <h2>Contacto</h2>
         <p>Puedes visitar esta web para más información: <strong>https://es.wikipedia.org/wiki/Neymar</strong></p>
     </section>
+<div id="chatbot">
+  <button onclick="toggleChat()">💬</button>
+  <div id="ventana">
+    <p>Hola, ¿en qué te ayudo?</p>
+  </div>
+</div>
 
+<script>
+function toggleChat() {
+  document.getElementById("ventana").classList.toggle("mostrar");
+}
+</script>
     <footer>
         © 2026 - Web dedicada a Neymar da Silva Santos Júnior
     </footer>
@@ -101,6 +112,7 @@
 </body>
 
 </html>
+
 
 
 
