@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Juego de Carreras con Aceleración</title>
+<style>
+  body{margin:0;overflow:hidden;background:#111;font-family:sans-serif;}
+  canvas{display:block;background:#88c070;}
+  #ui{position:absolute;top:10px;left:10px;color:#fff;font-size:16px;z-index:10;}
+  #menu{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);padding:30px;border-radius:12px;text-align:center;}
+  #menu button, #menu select{margin-top:15px;padding:10px 20px;border:none;border-radius:8px;background:#34d399;color:#000;font-weight:bold;cursor:pointer;}
+  #gameOver{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);padding:30px;border-radius:12px;text-align:center;display:none;}
+  #gameOver button{margin-top:15px;padding:10px 20px;border:none;border-radius:8px;background:#34d399;color:#000;font-weight:bold;cursor:pointer;}
+  #speedBar{position:absolute;top:10px;right:10px;width:200px;height:20px;background:#333;border-radius:10px;overflow:hidden;}
+  #speedFill{height:100%;background:linear-gradient(to right, #00ff00, #ffff00, #ff0000);width:0%;transition:width 0.3s;}
+</style>
+</head>
+<body>
+<div id="ui">
+  Controles: W = Acelerar, A = Izquierda, D = Derecha<br>
+  Tiempo: <span id="time">0.0</span> s | Velocidad: <span id="speed">8</span> km/h<br>
+  Puntuación: <span id="score">0</span> | Próximo aumento: <span id="nextBoost">20</span> s
+  <button id="pauseBtn">Pausa</button>
+</div>
+<div id="speedBar">
+  <div id="speedFill"></div>
+</div>
+<div id="menu">
+  <h1>Juego de Carreras</h1>
+  <select id="difficultySelect">
+    <option value="easy">Fácil</option>
+    <option value="medium" selected>Medio</option>
+    <option value="hard">Difícil</option>
+  </select>
+  <br>
+  <button id="startBtn">Iniciar Juego</button>
+</div>
+<div id="gameOver"><h1>Game Over</h1><div>Puntuación: <span id="finalScore">0</span></div><button id="restartBtn">Reiniciar</button></div>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const uiTime = document.getElementById('time');
+const uiSpeed = document.getElementById('speed');
+const uiScore = document.getElementById('score');
+const uiNextBoost = document.getElementById('nextBoost');
+const speedFill = document.getElementById('speedFill');
+const gameOverDiv = document.getElementById('gameOver');
+const finalScore = document.getElementById('finalScore');
+const restartBtn = document.getElementById('restartBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const menu = document.getElementById('menu');
+const startBtn = document.getElementById('startBtn');
+const difficultySelect = document.getElementById('difficultySelect');
+
+let player = { x: canvas.width/2, y: canvas.height - 120, width:50, height:80, wheelAngle:0 };
+let keys = { w: false, a: false, d: false };
+let aiCars = [];
+let obstacles = [];
+let coins = [];
+let frameCount = 0;
+let gameRunning = false;
+let explosion = null;
+let paused = false;
+let score = 0;
+let startTime = 0;
+let selectedDifficulty = 'medium';
+let currentSpeed = 8; // Velocidad base de la ruta
+let playerAcceleration = 0; // Aceleración adicional del jugador
+let maxPlayerAcceleration = 10; // Aceleración máxima que puede alcanzar el jugador
+let speedLevel = 1; // Nivel de velocidad (aumenta cada 20 segundos)
+let lastSpeedIncreaseTime = 0; // Tiempo del último aumento automático
+
+function initAI(){
+  aiCars = [];
+  const aiCount = selectedDifficulty === 'easy' ? 3 : selectedDifficulty === 'medium' ? 4 : 5;
+  
+  for(let i=0;i<aiCount;i++){
+    // Los coches IA no se mueven lateralmente, solo tienen posición X fija
+    const laneWidth = (canvas.width/2) / (aiCount + 1);
+    const xPos = canvas.width/4 + ((i+1) * laneWidth) - 25;
+    
+    aiCars.push({ 
+      x: xPos, 
+      y: Math.random()*-canvas.height, 
+      width:50, 
+      height:80, 
+      speed: currentSpeed * (0.8 + Math.random()*0.4), // Velocidad hacia abajo variable
+      lane: i // Carril fijo
+    });
+  }
+}
+
+function spawnObstacle(){
+  const width = 60 + Math.random()*60;
+  const laneWidth = canvas.width/2;
+  const x = canvas.width/4 + Math.random()*(laneWidth - width);
+  obstacles.push({x:x, y:-100, width:width, height:30});
+}
+
+function spawnCoin(){
+  const laneWidth = canvas.width/2;
+  const x = canvas.width/4 + Math.random()*(laneWidth - 20);
+  coins.push({x:x, y:-40, r:10});
+}
+
+window.addEventListener('keydown', e => {
+  if(e.key.toLowerCase() === 'w') keys.w = true;
+  if(e.key.toLowerCase() === 'a') keys.a = true;
+  if(e.key.toLowerCase() === 'd') keys.d = true;
+});
+
+window.addEventListener('keyup', e => { 
+  if(e.key.toLowerCase() === 'w') keys.w = false; 
+  if(e.key.toLowerCase() === 'a') keys.a = false; 
+  if(e.key.toLowerCase() === 'd') keys.d = false; 
+});
+
+pauseBtn.addEventListener('click', ()=>{ 
+  paused = !paused; 
+  pauseBtn.textContent = paused ? 'Reanudar' : 'Pausa'; 
+});
+
+function resetGame(){
+  player.x = canvas.width/2; 
+  player.y = canvas.height-120; 
+  player.wheelAngle = 0;
+  obstacles = [];
+  coins = [];
+  frameCount = 0; 
+  score = 0; 
+  startTime = Date.now();
+  currentSpeed = 8;
+  playerAcceleration = 0;
+  speedLevel = 1;
+  lastSpeedIncreaseTime = Date.now();
+  gameRunning = true; 
+  paused = false; 
+  gameOverDiv.style.display='none'; 
+  initAI();
+}
+restartBtn.addEventListener('click', resetGame);
+
+function checkCollision(a,b){ 
+  return !(a.x + a.width < b.x || a.x > b.x + b.width || a.y + a.height < b.y || a.y > b.y + b.height); 
+}
+
+function update(){
+  if(!gameRunning || paused) return;
+  
+  const elapsedTime = Date.now() - startTime;
+  const elapsedSeconds = elapsedTime / 1000;
+  
+  // ACTUALIZAR TIEMPO EN UI
+  uiTime.textContent = elapsedSeconds.toFixed(1);
+  
+  // ACELERACIÓN CON W
+  if(keys.w) {
+    // Aumentar aceleración gradualmente
+    playerAcceleration += 0.15;
+    if(playerAcceleration > maxPlayerAcceleration) {
+      playerAcceleration = maxPlayerAcceleration;
+    }
+  } else {
+    // Reducir aceleración gradualmente cuando no se presiona W
+    playerAcceleration *= 0.95;
+    if(playerAcceleration < 0.1) playerAcceleration = 0;
+  }
+  
+  // AUMENTO AUTOMÁTICO DE VELOCIDAD CADA 20 SEGUNDOS
+  const timeSinceLastIncrease = Date.now() - lastSpeedIncreaseTime;
+  if(timeSinceLastIncrease > 20000) { // 20 segundos
+    speedLevel++;
+    currentSpeed += 2; // Aumentar velocidad base
+    lastSpeedIncreaseTime = Date.now();
+    
+    // Actualizar velocidades de los coches IA
+    aiCars.forEach(ai => {
+      ai.speed = currentSpeed * (0.8 + Math.random()*0.4);
+    });
+  }
+  
+  // Calcular tiempo para próximo aumento
+  const timeToNextBoost = 20 - (timeSinceLastIncrease / 1000);
+  uiNextBoost.textContent = timeToNextBoost > 0 ? timeToNextBoost.toFixed(1) : "0.0";
+  
+  // Velocidad total = velocidad base + aceleración del jugador
+  const totalSpeed = currentSpeed + playerAcceleration;
+  
+  // Actualizar barra de velocidad (0-100%)
+  const speedPercentage = Math.min(100, (totalSpeed / 30) * 100);
+  speedFill.style.width = speedPercentage + '%';
+  
+  // MOVIMIENTO LATERAL
+  const lateralSpeed = 12;
+  if(keys.a){
+    player.x -= lateralSpeed;
+    player.wheelAngle = -20;
+  }
+  if(keys.d){
+    player.x += lateralSpeed;
+    player.wheelAngle = 20;
+  }
+  
+  // Si no se está presionando A o D, centrar las ruedas
+  if(!keys.a && !keys.d) {
+    player.wheelAngle = 0;
+  }
+
+  // Limitar al carril
+  const roadLeft = canvas.width/4;
+  const roadRight = 3*canvas.width/4 - player.width;
+  if(player.x < roadLeft || player.x > roadRight){ 
+    endGame(); 
+    return; 
+  }
+  player.x = Math.max(roadLeft, Math.min(roadRight, player.x));
+
+  // Actualizar coches IA
+  aiCars.forEach((ai,i) => {
+    // Los coches IA se mueven hacia abajo a velocidad variable
+    ai.y += ai.speed;
+    
+    // Colisión con jugador
+    if(checkCollision(player, ai)) endGame();
+
+    // Evitar superposiciones entre coches IA
+    aiCars.forEach((other,j)=>{
+      if(i!==j && checkCollision(ai,other)){
+        other.y = Math.random()*-canvas.height;
+      }
+    });
+
+    // Reaparecer coches IA cuando salen de la pantalla
+    if(ai.y > canvas.height + 100) {
+      ai.y = Math.random()*-canvas.height;
+    }
+  });
+
+  // Obstáculos - se mueven hacia abajo a la velocidad total
+  obstacles.forEach(o => o.y += totalSpeed);
+  obstacles = obstacles.filter(o => o.y < canvas.height + 50);
+  obstacles.forEach(o => { 
+    if(checkCollision(player,o)) endGame(); 
+  });
+
+  // Monedas - se mueven hacia abajo a la velocidad total
+  coins.forEach(c => c.y += totalSpeed);
+  coins = coins.filter(c => c.y < canvas.height + 50);
+  coins.forEach((c,i)=>{
+    const hit = player.x < c.x + c.r && player.x + player.width > c.x - c.r &&
+                player.y < c.y + c.r && player.y + player.height > c.y - c.r;
+    if(hit){ 
+      score += Math.floor(totalSpeed * 10); // Más puntos a mayor velocidad
+      coins.splice(i,1); 
+    }
+  });
+
+  // Generar nuevos objetos
+  frameCount++;
+  if(frameCount % Math.max(30, 60 - speedLevel*5) === 0) spawnCoin();
+  if(frameCount % Math.max(90, 120 - speedLevel*10) === 0) spawnObstacle();
+  
+  // Actualizar puntuación y velocidad en UI
+  score += Math.floor(totalSpeed / 10); // Puntos por velocidad
+  uiScore.textContent = score;
+  uiSpeed.textContent = Math.floor(totalSpeed * 10); // Convertir a km/h aproximados
+}
+
+function drawPlayer(){
+  const {x,y,width,height,wheelAngle} = player;
+  
+  // Sombra
+  ctx.fillStyle='rgba(0,0,0,0.4)';
+  ctx.fillRect(x+4,y+6,width,height);
+  
+  // Coche jugador (color cambia con velocidad)
+  const speedColor = Math.min(255, 100 + playerAcceleration * 15);
+  ctx.fillStyle=`rgb(0, ${speedColor}, 255)`;
+  ctx.fillRect(x,y,width,height);
+  
+  // Ventanas
+  ctx.fillStyle='rgba(255,255,255,0.6)';
+  ctx.fillRect(x+8,y+8,width-16,height/2-8);
+  
+  // Luces delanteras (brillan más al acelerar)
+  const lightIntensity = keys.w ? 1 : 0.7;
+  ctx.fillStyle=`rgba(255, 255, 0, ${lightIntensity})`;
+  ctx.fillRect(x+5,y+2,8,6);
+  ctx.fillRect(x+width-13,y+2,8,6);
+  
+  // Luces traseras (rojas al acelerar)
+  ctx.fillStyle=keys.w ? '#ff0000' : '#990000';
+  ctx.fillRect(x+5,y+height-8,8,6);
+  ctx.fillRect(x+width-13,y+height-8,8,6);
+  
+  // Ruedas
+  ctx.fillStyle='#000';
+  [[x+8,y+height-8],[x+width-8,y+height-8]].forEach(p=>{
+    ctx.save(); 
+    ctx.translate(p[0],p[1]); 
+    ctx.rotate(wheelAngle*Math.PI/180);
+    ctx.fillRect(-5,-5,10,10); 
+    ctx.restore();
+  });
+  
+  // Efecto de aceleración
+  if(keys.w && playerAcceleration > 5) {
+    // Humo de escape
+    ctx.fillStyle=`rgba(100, 100, 100, ${playerAcceleration/maxPlayerAcceleration})`;
+    ctx.beginPath();
+    ctx.ellipse(x+width/2, y+height+10, 15, 8, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+function drawAICar(ai){
+  // Coche IA
+  ctx.fillStyle='#ff4444';
+  ctx.fillRect(ai.x, ai.y, ai.width, ai.height);
+  
+  // Ventanas IA
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.fillRect(ai.x+10, ai.y+10, ai.width-20, ai.height/2-10);
+  
+  // Luces IA
+  ctx.fillStyle='yellow';
+  ctx.fillRect(ai.x+5, ai.y+2, 8, 6);
+  ctx.fillRect(ai.x+ai.width-13, ai.y+2, 8, 6);
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  
+  // Cielo con gradiente (más oscuro con velocidad)
+  const skyDarkness = Math.min(0.7, currentSpeed / 50);
+  const sky = ctx.createLinearGradient(0,0,0,canvas.height/2);
+  sky.addColorStop(0,`rgba(135, 206, 235, ${1 - skyDarkness})`);
+  sky.addColorStop(1,`rgba(224, 246, 255, ${1 - skyDarkness})`);
+  ctx.fillStyle = sky;
+  ctx.fillRect(0,0,canvas.width,canvas.height/2);
+  
+  // Vegetación
+  const grass = ctx.createLinearGradient(0,canvas.height/2,0,canvas.height);
+  grass.addColorStop(0,'#2ecc71');
+  grass.addColorStop(1,'#145a32');
+  ctx.fillStyle = grass;
+  ctx.fillRect(0,canvas.height/2,canvas.width,canvas.height/2);
+  
+  // Árboles con efecto de velocidad
+  const treeSpeed = currentSpeed / 5;
+  ctx.fillStyle='#145a32';
+  for(let i=0;i<15;i++){
+    const ty = (i*150 + (Date.now()/20 * treeSpeed)%150) % canvas.height;
+    ctx.beginPath(); 
+    ctx.arc(60, ty, 20,0,Math.PI*2); 
+    ctx.fill();
+    ctx.beginPath(); 
+    ctx.arc(canvas.width-60, ty+80, 20,0,Math.PI*2); 
+    ctx.fill();
+  }
+
+  // Carretera con efecto de velocidad
+  const road = ctx.createLinearGradient(canvas.width/4,0,3*canvas.width/4,0);
+  road.addColorStop(0,'#555');
+  road.addColorStop(0.5,'#444');
+  road.addColorStop(1,'#555');
+  ctx.fillStyle = road;
+  ctx.fillRect(canvas.width/4,0,canvas.width/2,canvas.height);
+  
+  // Líneas de carril con efecto de velocidad
+  ctx.strokeStyle='#fff'; 
+  ctx.lineWidth=3;
+  
+  // Línea central discontinua con movimiento proporcional a velocidad
+  ctx.setLineDash([40,30]);
+  const dashOffset = (Date.now()/8 * (currentSpeed/10)) % 70;
+  ctx.lineDashOffset = -dashOffset;
+  ctx.beginPath(); 
+  ctx.moveTo(canvas.width/2,0); 
+  ctx.lineTo(canvas.width/2,canvas.height); 
+  ctx.stroke(); 
+  
+  // Líneas laterales continuas
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(canvas.width/4, 0);
+  ctx.lineTo(canvas.width/4, canvas.height);
+  ctx.moveTo(3*canvas.width/4, 0);
+  ctx.lineTo(3*canvas.width/4, canvas.height);
+  ctx.stroke();
+  
+  // Marcas de carril
+  ctx.setLineDash([20, 30]);
+  ctx.lineWidth = 2;
+  const laneWidth = canvas.width/2 / 3;
+  for(let i=1; i<3; i++){
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/4 + laneWidth * i, 0);
+    ctx.lineTo(canvas.width/4 + laneWidth * i, canvas.height);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Dibujar coches IA
+  aiCars.forEach(ai => drawAICar(ai));
+  
+  // Dibujar jugador
+  if(gameRunning) drawPlayer();
+
+  // Dibujar obstáculos
+  ctx.fillStyle='#ff8800'; 
+  obstacles.forEach(o => {
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    ctx.fillRect(o.x+3, o.y+3, o.width, o.height);
+    
+    ctx.fillStyle='#ff8800';
+    ctx.fillRect(o.x, o.y, o.width, o.height);
+    
+    ctx.fillStyle='#ffff00';
+    ctx.fillRect(o.x+5, o.y+5, o.width-10, 5);
+    ctx.fillRect(o.x+5, o.y+20, o.width-10, 5);
+  });
+
+  // Dibujar monedas
+  ctx.fillStyle='gold'; 
+  coins.forEach(c=>{ 
+    // Efecto de giro de moneda
+    const coinRotation = Date.now() / 200;
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(coinRotation);
+    
+    ctx.fillStyle='gold';
+    ctx.beginPath(); 
+    ctx.arc(0, 0, c.r, 0, Math.PI*2); 
+    ctx.fill();
+    
+    ctx.fillStyle='rgba(255,255,255,0.7)';
+    ctx.beginPath(); 
+    ctx.arc(-3, -3, c.r/2, 0, Math.PI*2); 
+    ctx.fill();
+    
+    ctx.restore();
+  });
+
+  // Indicador de nivel de velocidad
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  ctx.font = 'bold 16px Arial';
+  ctx.fillText(`Nivel ${speedLevel}`, canvas.width - 100, 40);
+  ctx.fillText(`Velocidad: ${Math.floor((currentSpeed + playerAcceleration) * 10)} km/h`, canvas.width - 200, 65);
+  
+  // Dibujar explosión
+  if(explosion){
+    ctx.beginPath(); 
+    ctx.fillStyle = `rgba(255,100,0,${explosion.alpha})`;
+    ctx.arc(explosion.x, explosion.y, explosion.r, 0, Math.PI*2); 
+    ctx.fill();
+    
+    ctx.beginPath(); 
+    ctx.fillStyle = `rgba(255,200,0,${explosion.alpha*0.7})`;
+    ctx.arc(explosion.x, explosion.y, explosion.r*0.7, 0, Math.PI*2); 
+    ctx.fill();
+    
+    explosion.r += 6; 
+    explosion.alpha -= 0.04;
+    if(explosion.alpha <= 0) explosion = null;
+  }
+}
+
+function endGame(){
+  explosion = { x: player.x + player.width/2, y: player.y + player.height/2, r: 10, alpha: 1 };
+  gameRunning = false;
+  finalScore.textContent = score;
+  gameOverDiv.style.display = 'block';
+}
+
+function loop(){ 
+  update(); 
+  draw(); 
+  requestAnimationFrame(loop); 
+}
+
+startBtn.addEventListener('click', ()=>{ 
+  selectedDifficulty = difficultySelect.value; 
+  menu.style.display='none'; 
+  resetGame(); 
+});
+
+// Iniciar el bucle del juego
+loop();
+</script>
+</body>
+</html>
