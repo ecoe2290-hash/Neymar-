@@ -73,11 +73,63 @@
     <section id="estadio">
         <h2>Juego</h2>
         <p>
-           <h1>Mi Juego</h1>
+           <!DOCTYPE html>
+<html>
+<head>
+    <title>Mini Juego</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background-color: lightblue;
+        }
 
-<iframe src="juegos/122l.html" width="800" height="600" 
-        style="border: none;">
-</iframe>
+        #botonJuego {
+            width: 100px;
+            height: 100px;
+            background-color: red;
+            border-radius: 50%;
+            position: absolute;
+            cursor: pointer;
+        }
+
+        #puntos {
+            font-size: 24px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>¡Haz clic al círculo!</h1>
+    <p id="puntos">Puntos: 0</p>
+
+    <div id="botonJuego"></div>
+
+    <script>
+        const boton = document.getElementById("botonJuego");
+        const textoPuntos = document.getElementById("puntos");
+        let puntos = 0;
+
+        function moverBoton() {
+            const x = Math.random() * (window.innerWidth - 100);
+            const y = Math.random() * (window.innerHeight - 100);
+            boton.style.left = x + "px";
+            boton.style.top = y + "px";
+        }
+
+        boton.addEventListener("click", function() {
+            puntos++;
+            textoPuntos.textContent = "Puntos: " + puntos;
+            moverBoton();
+        });
+
+        moverBoton();
+    </script>
+
+</body>
+</html>
+
         </p>
     </section>
 
@@ -100,6 +152,7 @@
 </body>
 
 </html>
+
 
 
 
